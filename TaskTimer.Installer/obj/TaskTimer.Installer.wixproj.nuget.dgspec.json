@@ -1,0 +1,59 @@
+{
+  "format": 1,
+  "restore": {
+    "C:\\Temp\\DevOps\\TaskTimer.Installer\\TaskTimer.Installer.wixproj": {}
+  },
+  "projects": {
+    "C:\\Temp\\DevOps\\TaskTimer.Installer\\TaskTimer.Installer.wixproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "C:\\Temp\\DevOps\\TaskTimer.Installer\\TaskTimer.Installer.wixproj",
+        "projectName": "TaskTimerSetup",
+        "projectPath": "C:\\Temp\\DevOps\\TaskTimer.Installer\\TaskTimer.Installer.wixproj",
+        "packagesPath": "C:\\Users\\localadmin\\.nuget\\packages\\",
+        "outputPath": "C:\\Temp\\DevOps\\TaskTimer.Installer\\obj\\",
+        "projectStyle": "PackageReference",
+        "UsingMicrosoftNETSdk": false,
+        "fallbackFolders": [
+          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+        ],
+        "configFilePaths": [
+          "C:\\Users\\localadmin\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        ],
+        "originalTargetFrameworks": [
+          "native"
+        ],
+        "sources": {
+          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "native": {
+            "framework": "native",
+            "targetAlias": "native",
+            "projectReferences": {}
+          }
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        }
+      },
+      "frameworks": {
+        "native": {
+          "framework": "native",
+          "targetAlias": "native",
+          "dependencies": {
+            "WixToolset.UI.wixext": {
+              "target": "Package",
+              "version": "[5.0.2, )"
+            }
+          }
+        }
+      }
+    }
+  }
+}

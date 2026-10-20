@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "GwKu8pneEkE=",
+  "success": true,
+  "projectFilePath": "C:\\Temp\\DevOps\\TaskTimer.Installer\\TaskTimer.Installer.wixproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\localadmin\\.nuget\\packages\\wixtoolset.ui.wixext\\5.0.2\\wixtoolset.ui.wixext.5.0.2.nupkg.sha512"
+  ],
+  "logs": []
+}

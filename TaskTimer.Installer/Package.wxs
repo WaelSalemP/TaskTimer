@@ -1,0 +1,108 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <!-- Keep UpgradeCode unchanged forever: it is how a new version finds and replaces the old one. -->
+  <Package Name="Task Timer"
+           Manufacturer="Task Timer"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="6B0F6C0E-7C55-4E0B-9B5B-3D0B7B0C8A41"
+           Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Task Timer is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Icon shown in "Installed apps" / "Add or remove programs". -->
+    <Icon Id="AppIcon" SourceFile="..\TaskTimer\app.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+
+    <!-- Ticked by default; the Shortcuts page clears it when the user unticks the box. -->
+    <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" Secure="yes" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="Task Timer" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Task Timer">
+      <!-- Every file of the published app, subfolders included. -->
+      <Files Directory="INSTALLFOLDER" Include="$(var.AppPublishDir)**" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="RunAtSignIn" />
+    </Feature>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="B5E0B7A2-52C0-4B0B-8A7E-0D0C5E8C2F11">
+        <Shortcut Id="StartMenuShortcut"
+                  Name="Task Timer"
+                  Description="Time your Azure DevOps and GitHub tasks"
+                  Target="[INSTALLFOLDER]TaskTimer.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon" />
+        <!-- A shortcut cannot be a component's key path, so a marker value serves instead. -->
+        <RegistryValue Root="HKCU" Key="Software\TaskTimer" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="7A3D2E91-4C1B-4F7A-A6B3-5E9D8C1F2A64" Condition="INSTALLDESKTOPSHORTCUT">
+        <Shortcut Id="DesktopShortcut"
+                  Name="Task Timer"
+                  Description="Time your Azure DevOps and GitHub tasks"
+                  Target="[INSTALLFOLDER]TaskTimer.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon" />
+        <RegistryValue Root="HKCU" Key="Software\TaskTimer" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <!-- Start Task Timer for every user when they sign in to Windows. -->
+    <Component Id="RunAtSignIn" Directory="INSTALLFOLDER" Guid="0E4C1A0D-3B62-4B51-9D8E-6A6F0B2C7D32">
+      <RegistryValue Root="HKLM"
+                     Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                     Name="TaskTimer"
+                     Type="string"
+                     Value="&quot;[INSTALLFOLDER]TaskTimer.exe&quot;"
+                     KeyPath="yes" />
+    </Component>
+
+    <!--
+      Wizard: Welcome -> Installation folder -> Shortcuts -> Ready -> Progress -> Finish.
+      WixUI_InstallDir supplies everything except the Shortcuts page; the Publish elements below
+      splice that page in and skip the stock licence page (higher Order wins over the built-in step).
+    -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+
+    <UI>
+      <Dialog Id="ShortcutsDlg" Width="370" Height="270" Title="Task Timer Setup">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Shortcuts" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="Choose where Task Timer should be easy to find." />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+
+        <Control Id="DesktopShortcut" Type="CheckBox" X="25" Y="70" Width="320" Height="17"
+                 Property="INSTALLDESKTOPSHORTCUT" CheckBoxValue="1" Text="Create a shortcut on the &amp;desktop" />
+        <Control Id="StartMenuNote" Type="Text" X="25" Y="96" Width="320" Height="30" NoPrefix="yes"
+                 Text="A Start menu shortcut is always created, and Task Timer starts automatically when you sign in to Windows." />
+
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+      </Dialog>
+
+      <!-- Skip the licence page. -->
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="99" Condition="NOT Installed" />
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="99" />
+
+      <!-- Insert the Shortcuts page between the folder page and the Ready page. -->
+      <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="ShortcutsDlg" Order="99"
+               Condition="WIXUI_DONTVALIDATEPATH OR WIXUI_INSTALLDIR_VALID=&quot;1&quot;" />
+      <Publish Dialog="ShortcutsDlg" Control="Back" Event="NewDialog" Value="InstallDirDlg" />
+      <Publish Dialog="ShortcutsDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="ShortcutsDlg" Order="99" Condition="NOT Installed" />
+    </UI>
+
+  </Package>
+</Wix>
