@@ -1,0 +1,27 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+
+  <!--
+    Builds TaskTimerSetup.msi. Needs only the .NET SDK; the WiX toolset is restored from NuGet.
+        dotnet build TaskTimer.Installer -c Release
+  -->
+  <PropertyGroup>
+    <OutputName>TaskTimerSetup</OutputName>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <!-- Raise this for every release: Windows Installer only upgrades to a higher version. -->
+    <ProductVersion>1.0.17</ProductVersion>
+    <AppPublishDir>$(MSBuildProjectDirectory)\obj\app\</AppPublishDir>
+    <DefineConstants>AppPublishDir=$(AppPublishDir);ProductVersion=$(ProductVersion)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Standard wizard pages (welcome, installation folder, progress, finish). -->
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
+  </ItemGroup>
+
+  <!-- Publish the app (with the .NET runtime included) so the MSI always carries the current code. -->
+  <Target Name="PublishApp" BeforeTargets="BeforeBuild">
+    <RemoveDir Directories="$(AppPublishDir)" />
+    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\..\TaskTimer\TaskTimer.csproj&quot; -c Release -r win-x64 --self-contained true -o &quot;$(AppPublishDir.TrimEnd('\'))&quot; -nologo -v q" />
+  </Target>
+
+</Project>

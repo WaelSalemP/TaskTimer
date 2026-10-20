@@ -1,0 +1,6 @@
+C:\Temp\DevOps\TaskTimer.Installer\bin\Release\TaskTimerSetup.msi
+C:\Temp\DevOps\TaskTimer.Installer\bin\Release\TaskTimerSetup.wixpdb
+C:\Temp\DevOps\TaskTimer.Installer\obj\Release\TaskTimer.Installer.wixproj.CoreCompileInputs.cache
+C:\Temp\DevOps\TaskTimer.Installer\obj\Release\TaskTimerSetup.msi
+C:\Temp\DevOps\TaskTimer.Installer\obj\Release\TaskTimerSetup.wixpdb
+C:\Temp\DevOps\TaskTimer.Installer\obj\Release\TaskTimer.Installer.wixproj.BindTracking-neutral.txt
