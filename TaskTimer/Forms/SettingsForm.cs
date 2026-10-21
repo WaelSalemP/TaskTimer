@@ -22,6 +22,7 @@ public sealed class SettingsForm : Form
     private readonly Label _customerFieldLabel = NewLabel();
     private readonly TextBox _customerField = new() { Dock = DockStyle.Fill, PlaceholderText = "System.AreaPath / Custom.Customer" };
     private readonly NumericUpDown _idleSeconds = new() { Maximum = 86400, Increment = 30, Width = 100, Anchor = AnchorStyles.Left };
+    private readonly NumericUpDown _minCallMinutes = new() { Maximum = 240, Width = 100, Anchor = AnchorStyles.Left };
     private readonly TextBox _workPaths = new() { Dock = DockStyle.Fill };
     private readonly Button _browse = new() { AutoSize = true, Dock = DockStyle.Right };
     private readonly Label _deliveryFieldLabel = NewLabel();
@@ -47,7 +48,7 @@ public sealed class SettingsForm : Form
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterParent;
         AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(720, 620);
+        ClientSize = new Size(720, 655);
         Loc.ApplyDirection(this);
         Theme.StyleForm(this, Theme.Surface);
         Theme.StyleButton(_save, Theme.Primary);
@@ -80,6 +81,7 @@ public sealed class SettingsForm : Form
         _deliveryFieldLabel.Text = Loc.T("DeliveryField");
         AddRow(table, _deliveryFieldLabel, _deliveryField);
         AddRow(table, NewLabel(Loc.T("IdleSeconds")), _idleSeconds);
+        AddRow(table, NewLabel(Loc.T("MinCallMinutes")), _minCallMinutes);
 
         _browse.Text = Loc.T("Browse");
         var workPathsPanel = new Panel { Dock = DockStyle.Fill, Height = _browse.PreferredSize.Height + 2, Margin = new Padding(3) };
@@ -129,6 +131,7 @@ public sealed class SettingsForm : Form
         _deliveryField.Text = settings.DeliveryDateField;
         _workPaths.Text = settings.WorkPaths;
         _idleSeconds.Value = Math.Clamp(settings.IdlePauseSeconds, 0, (int)_idleSeconds.Maximum);
+        _minCallMinutes.Value = Math.Clamp(settings.MinCallMinutes, 0, (int)_minCallMinutes.Maximum);
         _pat.Text = SettingsStore.GetPat(settings);
         _autoDetect.Checked = settings.AutoDetectTeams;
         _autoResume.Checked = settings.AutoResumeLastTask;
@@ -190,6 +193,7 @@ public sealed class SettingsForm : Form
         target.DeliveryDateField = _deliveryField.Text.Trim();
         target.WorkPaths = _workPaths.Text.Trim();
         target.IdlePauseSeconds = (int)_idleSeconds.Value;
+        target.MinCallMinutes = (int)_minCallMinutes.Value;
         SettingsStore.SetPat(target, _pat.Text.Trim());
         target.AutoDetectTeams = _autoDetect.Checked;
         target.AutoResumeLastTask = _autoResume.Checked;

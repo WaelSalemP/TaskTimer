@@ -154,6 +154,8 @@ public sealed class AppSettings
     public bool AddComment { get; set; } = true;
     /// <summary>Pause the task timer after this many seconds without keyboard/mouse input. 0 = never.</summary>
     public int IdlePauseSeconds { get; set; } = 300;
+    /// <summary>Calls and meetings shorter than this are neither asked about nor recorded. 0 = record all.</summary>
+    public int MinCallMinutes { get; set; } = 2;
     /// <summary>Continue timing the task that was running when the app was last closed.</summary>
     public bool AutoResumeLastTask { get; set; } = true;
     /// <summary>When false, starting a task stops the one that was running.</summary>

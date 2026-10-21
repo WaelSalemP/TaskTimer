@@ -349,6 +349,8 @@ public static class Loc
         ["ConfirmDeleteAccount"] = ("Remove the account \"{0}\" from this app? Its unsent time stays saved, but is hidden unless the account is added again.",
             "هل تريد إزالة الحساب \"{0}\" من التطبيق؟ يبقى وقته غير المرسل محفوظاً، لكنه يُخفى ما لم يُضف الحساب مجدداً."),
         ["SwitchDuringCall"] = ("Finish the call or meeting before switching accounts.", "أنهِ المكالمة أو الاجتماع قبل تبديل الحساب."),
+        ["MinCallMinutes"] = ("Ignore calls shorter than (minutes, 0 = keep all)", "تجاهل المكالمات الأقصر من (دقائق، 0 = حفظ الكل)"),
+        ["CallIgnored"] = ("Short call ({0}) not recorded", "مكالمة قصيرة ({0}) لم تُسجَّل"),
         ["Provider"] = ("Provider", "المزوّد"),
         ["OrgUrl"] = ("Organization URL", "رابط المؤسسة"),
         ["ApiUrl"] = ("API URL (optional)", "رابط الـ API (اختياري)"),

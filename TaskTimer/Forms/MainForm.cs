@@ -14,7 +14,12 @@ public sealed class MainForm : Form
         public WorkItem? Target;
         /// <summary>Task whose timer was interrupted and must resume after the call.</summary>
         public List<WorkItem> ResumeTasks = new();
+        /// <summary>Whether the "call started" question has been shown yet.</summary>
+        public bool Asked;
     }
+
+    /// <summary>Calls shorter than this are not asked about and not recorded.</summary>
+    private double MinCallSeconds => Math.Max(0, _settings.MinCallMinutes) * 60.0;
 
     private sealed record FilterOption(string Value, string Text)
     {
@@ -1048,7 +1053,15 @@ public sealed class MainForm : Form
         _offReadings = 0;
         UpdateUi();
 
-        using var form = new AssignTimeForm(false, TimeSpan.Zero, TimeableItems, _activeTask, call.Kind, _activeTask);
+        // A detected call is only asked about once it has lasted the minimum length (see OnTick), so
+        // short calls never interrupt. A call started with the button is asked about at once.
+        if (!auto || MinCallSeconds == 0) AskCallStart(call);
+    }
+
+    private void AskCallStart(CallSession call)
+    {
+        call.Asked = true;
+        using var form = new AssignTimeForm(false, DateTime.UtcNow - call.StartUtc, TimeableItems, _activeTask, call.Kind, _activeTask);
         ShowModal(form);
         call.Kind = form.Kind;
         call.Target = form.Target;
@@ -1063,6 +1076,16 @@ public sealed class MainForm : Form
 
         var end = call.EndUtc ?? DateTime.UtcNow;
         var duration = end - call.StartUtc;
+
+        // Too short to matter: no question, nothing recorded, and the paused tasks simply carry on.
+        if (duration.TotalSeconds < MinCallSeconds)
+        {
+            foreach (var task in call.ResumeTasks) ResumeTask(task);
+            SetStatus("CallIgnored", duration.ToString(@"m\:ss"));
+            RefreshGrid();
+            return;
+        }
+
         using (var form = new AssignTimeForm(true, duration, TimeableItems, _activeTask, call.Kind, call.Target))
         {
             ShowModal(form);
@@ -1553,6 +1576,11 @@ public sealed class MainForm : Form
         UpdateTimers();
         TrackWorkday();
         CheckIdle();
+
+        // A detected call that has now lasted the minimum length gets its "call started" question.
+        if (_call is { Asked: false, EndUtc: null } waiting && !_dialogOpen &&
+            (DateTime.UtcNow - waiting.StartUtc).TotalSeconds >= MinCallSeconds)
+            AskCallStart(waiting);
 
         if (_tick % AutoSyncEveryTicks == 0 && !_dialogOpen && _syncButton.Enabled)
             _ = SyncAsync(silent: true);
