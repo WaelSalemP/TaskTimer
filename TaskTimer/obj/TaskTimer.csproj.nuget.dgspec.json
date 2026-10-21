@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\localadmin\\Documents\\GitHub\\TaskTimer\\TaskTimer\\TaskTimer.csproj": {}
+    "C:\\Temp\\DevOps\\TaskTimer\\TaskTimer.csproj": {}
   },
   "projects": {
-    "C:\\Users\\localadmin\\Documents\\GitHub\\TaskTimer\\TaskTimer\\TaskTimer.csproj": {
+    "C:\\Temp\\DevOps\\TaskTimer\\TaskTimer.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\localadmin\\Documents\\GitHub\\TaskTimer\\TaskTimer\\TaskTimer.csproj",
+        "projectUniqueName": "C:\\Temp\\DevOps\\TaskTimer\\TaskTimer.csproj",
         "projectName": "TaskTimer",
-        "projectPath": "C:\\Users\\localadmin\\Documents\\GitHub\\TaskTimer\\TaskTimer\\TaskTimer.csproj",
+        "projectPath": "C:\\Temp\\DevOps\\TaskTimer\\TaskTimer.csproj",
         "packagesPath": "C:\\Users\\localadmin\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\localadmin\\Documents\\GitHub\\TaskTimer\\TaskTimer\\obj\\",
+        "outputPath": "C:\\Temp\\DevOps\\TaskTimer\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
@@ -73,20 +73,6 @@
           ],
           "assetTargetFallback": true,
           "warn": true,
-          "downloadDependencies": [
-            {
-              "name": "Microsoft.AspNetCore.App.Runtime.win-x64",
-              "version": "[10.0.13, 10.0.13]"
-            },
-            {
-              "name": "Microsoft.NETCore.App.Runtime.win-x64",
-              "version": "[10.0.13, 10.0.13]"
-            },
-            {
-              "name": "Microsoft.WindowsDesktop.App.Runtime.win-x64",
-              "version": "[10.0.13, 10.0.13]"
-            }
-          ],
           "frameworkReferences": {
             "Microsoft.NETCore.App": {
               "privateAssets": "all"
@@ -386,11 +372,6 @@
             "System.Xml.XPath": "(,4.3.32767]",
             "System.Xml.XPath.XDocument": "(,5.0.32767]"
           }
-        }
-      },
-      "runtimes": {
-        "win-x64": {
-          "#import": []
         }
       }
     }
