@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "9DEHhXkqkP8=",
+  "dgSpecHash": "sGwRdTr2+T4=",
   "success": true,
-  "projectFilePath": "C:\\Temp\\DevOps\\TaskTimer\\TaskTimer.csproj",
+  "projectFilePath": "C:\\Users\\localadmin\\Documents\\GitHub\\TaskTimer\\TaskTimer\\TaskTimer.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\localadmin\\.nuget\\packages\\microsoft.identity.client\\4.91.0\\microsoft.identity.client.4.91.0.nupkg.sha512",
     "C:\\Users\\localadmin\\.nuget\\packages\\microsoft.identity.client.extensions.msal\\4.91.0\\microsoft.identity.client.extensions.msal.4.91.0.nupkg.sha512",

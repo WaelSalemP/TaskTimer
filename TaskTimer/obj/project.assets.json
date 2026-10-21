@@ -176,11 +176,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Temp\\DevOps\\TaskTimer\\TaskTimer.csproj",
+      "projectUniqueName": "C:\\Users\\localadmin\\Documents\\GitHub\\TaskTimer\\TaskTimer\\TaskTimer.csproj",
       "projectName": "TaskTimer",
-      "projectPath": "C:\\Temp\\DevOps\\TaskTimer\\TaskTimer.csproj",
+      "projectPath": "C:\\Users\\localadmin\\Documents\\GitHub\\TaskTimer\\TaskTimer\\TaskTimer.csproj",
       "packagesPath": "C:\\Users\\localadmin\\.nuget\\packages\\",
-      "outputPath": "C:\\Temp\\DevOps\\TaskTimer\\obj\\",
+      "outputPath": "C:\\Users\\localadmin\\Documents\\GitHub\\TaskTimer\\TaskTimer\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

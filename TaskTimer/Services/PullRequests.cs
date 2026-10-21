@@ -9,7 +9,17 @@ namespace TaskTimer.Services;
 public sealed record PullRequest(
     int Id, string Title, string Project, string RepositoryId, string RepositoryName,
     string SourceBranch, string TargetBranch, string CreatedBy, string CreatedById, DateTime? Created,
-    bool IsDraft, string MergeStatus, int MyVote, bool IAmReviewer, string Reviewers, string WebUrl);
+    bool IsDraft, string MergeStatus, int MyVote, bool IAmReviewer, string Reviewers, string WebUrl, string ProjectId);
+
+/// <summary>One branch policy evaluated on a pull request (build, reviewers, linked work items, comments...).</summary>
+/// <param name="Status">"approved" (passed), "rejected" (failed), "running", "queued", "broken" or "notApplicable".</param>
+/// <param name="IsBlocking">Required: the pull request cannot be completed until it passes.</param>
+public sealed record PolicyCheck(string Name, string Status, bool IsBlocking)
+{
+    public bool Passed => Status == "approved";
+    public bool Failed => Status is "rejected" or "broken";
+    public bool Pending => Status is "running" or "queued";
+}
 
 /// <param name="ChangeType">Azure DevOps change type, e.g. "add", "edit", "delete", "rename" or "edit, rename".</param>
 public sealed record PullRequestFileChange(string Path, string OriginalPath, string ChangeType)
@@ -29,6 +39,12 @@ public sealed record PullRequestFileChange(string Path, string OriginalPath, str
 /// <summary>A comment from a pull request thread. <see cref="FilePath"/> is empty for general comments.</summary>
 /// <param name="LeftSide">True when anchored to a line of the old (target) version, e.g. a removed line.</param>
 public sealed record PullRequestComment(string FilePath, int Line, bool LeftSide, string Author, string Text, DateTime? Date, string Status);
+
+/// <summary>A work item as shown in link lists: enough to recognise it and open it.</summary>
+public sealed record LinkedWorkItem(string Id, string Type, string Title, string State, string AssignedTo, string WebUrl)
+{
+    public override string ToString() => $"{Type} {Id} - {Title}";
+}
 
 public sealed record GitRepository(string Id, string Name, string DefaultBranch)
 {
@@ -108,7 +124,8 @@ public sealed class PullRequestService : HttpProviderBase
             mine?["vote"]?.GetValue<int>() ?? 0,
             mine != null,
             string.Join(", ", reviewers.Select(r => r!["displayName"]?.ToString()).Where(n => !string.IsNullOrEmpty(n))),
-            $"{ProjectUrl(repository?["project"]?["name"]?.ToString() ?? project)}/_git/{Uri.EscapeDataString(repoName)}/pullrequest/{id}");
+            $"{ProjectUrl(repository?["project"]?["name"]?.ToString() ?? project)}/_git/{Uri.EscapeDataString(repoName)}/pullrequest/{id}",
+            repository?["project"]?["id"]?.ToString() ?? "");
     }
 
     private static string ShortBranch(string? reference) =>
@@ -122,6 +139,81 @@ public sealed class PullRequestService : HttpProviderBase
     {
         var me = await GetMyIdAsync(ct);
         await SendAsync(HttpMethod.Put, $"{PullRequestUrl(pr)}/reviewers/{me}?{Api}", new { vote }, "application/json", ct);
+    }
+
+    /// <summary>The branch policies evaluated for the pull request, as on its Overview page; not-applicable ones left out.</summary>
+    public async Task<List<PolicyCheck>> GetChecksAsync(PullRequest pr, CancellationToken ct = default)
+    {
+        var artifact = Uri.EscapeDataString($"vstfs:///CodeReview/CodeReviewId/{pr.ProjectId}/{pr.Id}");
+        var url = $"{ProjectUrl(pr.Project)}/_apis/policy/evaluations?artifactId={artifact}&api-version=7.0-preview.1";
+        var json = await SendAsync(HttpMethod.Get, url, null, "application/json", ct);
+        return (json["value"]?.AsArray() ?? new JsonArray())
+            .Where(e => e != null)
+            .Select(e =>
+            {
+                var configuration = e!["configuration"];
+                // Build policies carry their own name (e.g. "CI build"); others use the policy type's name.
+                var name = configuration?["settings"]?["displayName"]?.ToString();
+                if (string.IsNullOrWhiteSpace(name)) name = configuration?["type"]?["displayName"]?.ToString() ?? "";
+                return new PolicyCheck(name, e["status"]?.ToString() ?? "", configuration?["isBlocking"]?.GetValue<bool>() ?? false);
+            })
+            .Where(c => c.Status != "notApplicable")
+            .ToList();
+    }
+
+    // ---------- linked work items ----------
+
+    /// <summary>The work items linked to the pull request.</summary>
+    public async Task<List<LinkedWorkItem>> GetLinkedWorkItemsAsync(PullRequest pr, CancellationToken ct = default)
+    {
+        var json = await SendAsync(HttpMethod.Get, $"{PullRequestUrl(pr)}/workitems?{Api}", null, "application/json", ct);
+        var ids = (json["value"]?.AsArray() ?? new JsonArray())
+            .Select(w => int.TryParse(w?["id"]?.ToString(), out var id) ? id : 0).Where(id => id > 0).ToList();
+        return await LoadWorkItemsAsync(ids, ct);
+    }
+
+    /// <summary>
+    /// Finds work items of any type (task, bug, user story, change request...) by ID anywhere, or by
+    /// words in the title within the project; newest changes first.
+    /// </summary>
+    public async Task<List<LinkedWorkItem>> SearchWorkItemsAsync(string project, string text, CancellationToken ct = default)
+    {
+        static string Quote(string s) => "'" + s.Replace("'", "''") + "'";
+        // Test cases, suites and plans would crowd out the tasks, bugs and stories people link.
+        var byTitle = $"([System.TeamProject] = {Quote(project)} AND [System.Title] CONTAINS {Quote(text)} AND " +
+                      "[System.WorkItemType] NOT IN ('Test Case', 'Test Suite', 'Test Plan', 'Shared Steps', 'Shared Parameter'))";
+        var condition = int.TryParse(text, out var id) && id > 0 ? $"([System.Id] = {id} OR {byTitle})" : byTitle;
+        var query = $"SELECT [System.Id] FROM WorkItems WHERE {condition} AND [System.State] <> 'Removed' ORDER BY [System.ChangedDate] DESC";
+        var result = await SendAsync(HttpMethod.Post, $"{_org}/_apis/wit/wiql?$top=50&{Api}", new { query }, "application/json", ct);
+        var ids = (result["workItems"]?.AsArray() ?? new JsonArray()).Select(w => w!["id"]!.GetValue<int>()).ToList();
+        return await LoadWorkItemsAsync(ids, ct);
+    }
+
+    private async Task<List<LinkedWorkItem>> LoadWorkItemsAsync(IReadOnlyCollection<int> ids, CancellationToken ct)
+    {
+        var items = new List<LinkedWorkItem>();
+        foreach (var chunk in ids.Distinct().Chunk(200)) // workitemsbatch limit
+        {
+            var body = new
+            {
+                ids = chunk,
+                fields = new[] { "System.Id", "System.Title", "System.WorkItemType", "System.State", "System.AssignedTo", "System.TeamProject" },
+                errorPolicy = "omit"
+            };
+            var batch = await SendAsync(HttpMethod.Post, $"{_org}/_apis/wit/workitemsbatch?{Api}", body, "application/json", ct);
+            foreach (var node in batch["value"]?.AsArray() ?? new JsonArray())
+            {
+                var f = node?["fields"];
+                if (f == null) continue;
+                var id = node!["id"]!.ToString();
+                items.Add(new LinkedWorkItem(id, f["System.WorkItemType"]?.ToString() ?? "", f["System.Title"]?.ToString() ?? "",
+                    f["System.State"]?.ToString() ?? "", f["System.AssignedTo"]?["displayName"]?.ToString() ?? "",
+                    $"{ProjectUrl(f["System.TeamProject"]?.ToString() ?? "")}/_workitems/edit/{id}"));
+            }
+        }
+        // Keep the order asked for (search results arrive newest first).
+        var order = ids.Select((id, index) => (id, index)).GroupBy(p => p.id).ToDictionary(g => g.Key.ToString(), g => g.First().index);
+        return items.OrderBy(i => order.GetValueOrDefault(i.Id, int.MaxValue)).ToList();
     }
 
     // ---------- code review ----------

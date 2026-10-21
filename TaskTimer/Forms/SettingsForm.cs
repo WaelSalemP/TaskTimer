@@ -7,7 +7,12 @@ public sealed class SettingsForm : Form
 {
     private readonly AppSettings _settings;
 
+    private readonly TextBox _accountName = new() { Dock = DockStyle.Fill };
+    private readonly Button _deleteAccount = new() { AutoSize = true };
     private readonly ComboBox _provider = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+
+    /// <summary>Set when the user chose to remove this account; the main window does the rest.</summary>
+    public bool DeleteRequested { get; private set; }
     private readonly Label _urlLabel = NewLabel();
     private readonly TextBox _url = new() { Dock = DockStyle.Fill };
     private readonly Label _projectLabel = NewLabel();
@@ -42,7 +47,7 @@ public sealed class SettingsForm : Form
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.CenterParent;
         AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(720, 583);
+        ClientSize = new Size(720, 620);
         Loc.ApplyDirection(this);
         Theme.StyleForm(this, Theme.Surface);
         Theme.StyleButton(_save, Theme.Primary);
@@ -64,6 +69,7 @@ public sealed class SettingsForm : Form
         _save.Text = Loc.T("Save");
         _cancel.Text = Loc.T("Cancel");
 
+        AddRow(table, NewLabel(Loc.T("AccountName")), _accountName);
         AddRow(table, NewLabel(Loc.T("Provider")), _provider);
         AddRow(table, _urlLabel, _url);
         AddRow(table, _projectLabel, _project);
@@ -93,13 +99,28 @@ public sealed class SettingsForm : Form
             Dock = DockStyle.Bottom, FlowDirection = FlowDirection.RightToLeft, AutoSize = true,
             Padding = new Padding(8)
         };
-        buttons.Controls.AddRange(new Control[] { _cancel, _save, _test });
+        // Removing an account only makes sense while another one is left.
+        _deleteAccount.Text = Loc.T("DeleteAccount");
+        _deleteAccount.Padding = new Padding(8, 3, 8, 3);
+        _deleteAccount.Visible = settings.Connections.Count > 1;
+        Theme.StyleButton(_deleteAccount, Theme.Coral);
+        _deleteAccount.Click += (_, _) =>
+        {
+            var answer = MessageBox.Show(this, Loc.T("ConfirmDeleteAccount", settings.ConnectionName), Text, MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2, Loc.MsgOptions);
+            if (answer != DialogResult.Yes) return;
+            DeleteRequested = true;
+            DialogResult = DialogResult.Abort;
+            Close();
+        };
+        buttons.Controls.AddRange(new Control[] { _cancel, _save, _test, _deleteAccount });
 
         Controls.Add(table);
         Controls.Add(buttons);
         AcceptButton = _save;
         CancelButton = _cancel;
 
+        _accountName.Text = settings.ConnectionName;
         _provider.SelectedIndex = (int)settings.Provider;
         _url.Text = settings.Url;
         _project.Text = settings.Project;
@@ -161,6 +182,7 @@ public sealed class SettingsForm : Form
         }
 
         target.Provider = (ProviderKind)_provider.SelectedIndex;
+        target.ConnectionName = _accountName.Text.Trim();
         target.Url = _url.Text.Trim();
         target.Project = _project.Text.Trim();
         target.Team = _team.Text.Trim();

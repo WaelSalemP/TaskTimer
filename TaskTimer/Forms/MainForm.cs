@@ -65,6 +65,9 @@ public sealed class MainForm : Form
     private readonly Panel _toolsHost = new() { Dock = DockStyle.Top, Padding = new Padding(10, 20, 10, 4) };
     private readonly GroupBox _toolsGroup = new() { Dock = DockStyle.Fill, Padding = new Padding(10, 12, 10, 20) };
     private readonly FlowLayoutPanel _toolsFlow = new() { Dock = DockStyle.Fill };
+    private readonly Label _accountLabel = NewFilterLabel();
+    private readonly ComboBox _accountCombo = NewFilterCombo(200);
+    private bool _loadingAccounts;
     private readonly Button _syncButton = NewToolButton();
     private readonly Button _settingsButton = NewToolButton();
     private readonly Button _teamButton = NewToolButton();
@@ -141,6 +144,8 @@ public sealed class MainForm : Form
     public MainForm()
     {
         Loc.IsArabic = _settings.Language == "ar";
+        TimeLog.ActiveConnection = _settings.ActiveConnectionId;
+        _log.AssignUnownedEntries(_settings.ActiveConnectionId);
         Theme.IsDark = _settings.DarkTheme;
         Icon = Program.AppIcon;
         Font = new Font("Segoe UI", 9.5f);
@@ -153,7 +158,7 @@ public sealed class MainForm : Form
 
         _actionsFlow.Controls.AddRange(new Control[]
         {
-            _syncButton, _settingsButton, _teamButton, _pullRequestsButton, _langButton, _themeButton, _transparencyLabel, _transparencyBar
+            _accountLabel, _accountCombo, _syncButton, _settingsButton, _teamButton, _pullRequestsButton, _langButton, _themeButton, _transparencyLabel, _transparencyBar
         });
         _transparencyBar.Value = Math.Clamp(_settings.WindowTransparency, _transparencyBar.Minimum, _transparencyBar.Maximum);
         Opacity = 1 - _transparencyBar.Value / 100.0;
@@ -231,6 +236,7 @@ public sealed class MainForm : Form
         _settingsButton.Click += async (_, _) => await OpenSettingsAsync();
         _langButton.Click += (_, _) => ToggleLanguage();
         _themeButton.Click += (_, _) => ToggleTheme();
+        _accountCombo.SelectedIndexChanged += async (_, _) => await OnAccountChosenAsync();
         _pullRequestsButton.Click += (_, _) => OpenPullRequests();
         _teamButton.Click += async (_, _) =>
         {
@@ -436,6 +442,8 @@ public sealed class MainForm : Form
         _customerLabel.Text = Loc.T("Customer");
         _assigneeLabel.Text = Loc.T("Assignee");
         _actionsGroup.Text = Loc.T("GroupActions");
+        _accountLabel.Text = Loc.T("Account");
+        RebuildAccounts();
         _pullRequestsButton.Text = Loc.T("PullRequests");
         _themeButton.Text = Loc.T(Theme.IsDark ? "ThemeLight" : "ThemeDark");
         _transparencyLabel.Text = Loc.T("Transparency");
@@ -479,7 +487,14 @@ public sealed class MainForm : Form
     private async Task OpenSettingsAsync()
     {
         using var form = new SettingsForm(_settings);
-        if (ShowModal(form) != DialogResult.OK) return;
+        var result = ShowModal(form);
+        if (form.DeleteRequested)
+        {
+            await DeleteActiveAccountAsync();
+            return;
+        }
+        RebuildAccounts(); // the name may have changed
+        if (result != DialogResult.OK) return;
         if (!_settings.AllowMultipleTasks)
             foreach (var key in _running.Keys.Where(k => k != _activeTask?.Key).ToList()) StopTask(key);
         RestartFileWatcher();
@@ -1118,6 +1133,108 @@ public sealed class MainForm : Form
                 await RefreshMachineStatusAsync(interactive: true);
             }
         }
+    }
+
+    // ---------- accounts ----------
+
+    /// <summary>Sentinel entry at the end of the account list.</summary>
+    private sealed record AddAccountOption
+    {
+        public override string ToString() => Loc.T("AddAccount");
+    }
+
+    private void RebuildAccounts()
+    {
+        _loadingAccounts = true;
+        try
+        {
+            _accountCombo.Items.Clear();
+            _accountCombo.Items.AddRange(_settings.Connections.Cast<object>().ToArray());
+            _accountCombo.Items.Add(new AddAccountOption());
+            _accountCombo.SelectedItem = _settings.ActiveConnection;
+        }
+        finally
+        {
+            _loadingAccounts = false;
+        }
+    }
+
+    private async Task OnAccountChosenAsync()
+    {
+        if (_loadingAccounts) return;
+        if (_accountCombo.SelectedItem is AddAccountOption)
+        {
+            await AddAccountAsync();
+            return;
+        }
+        if (_accountCombo.SelectedItem is ConnectionProfile profile && profile.Id != _settings.ActiveConnectionId)
+            if (SwitchAccount(profile)) await SyncAsync();
+    }
+
+    /// <summary>
+    /// Makes another account the active one. Running timers are stopped first, so their time is saved
+    /// under the account it was recorded in.
+    /// </summary>
+    private bool SwitchAccount(ConnectionProfile profile)
+    {
+        if (_call != null)
+        {
+            ShowMessage(Loc.T("SwitchDuringCall"));
+            RebuildAccounts(); // put the selection back
+            return false;
+        }
+
+        StopAllTasks();
+        _idlePausedTasks.Clear();
+        _activeTask = null;
+        _settings.StoreActiveConnection();
+        _settings.ActivateConnection(profile);
+        _settings.LastTaskKey = "";
+        _settings.LastTaskRunning = false;
+        SettingsStore.Save(_settings);
+        TimeLog.ActiveConnection = profile.Id;
+
+        _items.Clear();
+        _sprints.Clear();
+        MergeLocalTasks();
+        RebuildAccounts();
+        RebuildFilters();
+        RefreshGrid();
+        return true;
+    }
+
+    private async Task AddAccountAsync()
+    {
+        var previous = _settings.ActiveConnection;
+        var profile = new ConnectionProfile { Name = Loc.T("NewAccountName", _settings.Connections.Count + 1) };
+        _settings.Connections.Add(profile);
+        if (!SwitchAccount(profile))
+        {
+            _settings.Connections.Remove(profile);
+            RebuildAccounts();
+            return;
+        }
+        await OpenSettingsAsync(); // fill in the new account's address and token; syncs when saved
+
+        // Cancelled before giving a token: drop the empty account and go back to the previous one.
+        if (_settings.PatProtected.Length == 0 && previous != null && _settings.ActiveConnectionId == profile.Id && SwitchAccount(previous))
+        {
+            _settings.Connections.Remove(profile);
+            SettingsStore.Save(_settings);
+            RebuildAccounts();
+            await SyncAsync();
+        }
+    }
+
+    private async Task DeleteActiveAccountAsync()
+    {
+        if (_settings.Connections.Count < 2 || _settings.ActiveConnection is not { } current) return;
+        var next = _settings.Connections.First(c => c.Id != current.Id);
+        if (!SwitchAccount(next)) return;
+        _settings.Connections.Remove(current);
+        SettingsStore.Save(_settings);
+        RebuildAccounts();
+        await SyncAsync();
     }
 
     // ---------- pull requests ----------
