@@ -27,6 +27,7 @@ public sealed class PullRequestsForm : Form
     private readonly Button _complete = NewButton("PrComplete", Theme.Violet);
     private readonly Button _open = NewButton("OpenInBrowser", Theme.Neutral);
     private readonly Button _review = NewButton("PrReview", Theme.Primary);
+    private readonly Button _workItems = NewButton("PrWorkItems", Theme.Neutral);
 
     /// <param name="projects">Azure DevOps projects to look in.</param>
     /// <param name="currentTask">Task selected in the main window, offered as the link for a new pull request.</param>
@@ -50,7 +51,7 @@ public sealed class PullRequestsForm : Form
         Theme.StyleForm(this, Theme.Surface);
         Theme.StyleGrid(_grid);
 
-        foreach (var key in new[] { "PrColId", "PrColTitle", "PrColRepo", "PrColBranches", "PrColAuthor", "PrColReviewers", "PrColMyVote", "PrColCreated" })
+        foreach (var key in new[] { "PrColId", "PrColTitle", "PrColRepo", "PrColBranches", "PrColAuthor", "PrColReviewers", "PrColMyVote", "PrColChecks", "PrColCreated" })
             _grid.Columns.Add(new DataGridViewTextBoxColumn { Name = key, HeaderText = Loc.T(key), SortMode = DataGridViewColumnSortMode.Automatic });
         _grid.Columns["PrColId"]!.FillWeight = 35;
         _grid.Columns["PrColTitle"]!.FillWeight = 220;
@@ -59,12 +60,12 @@ public sealed class PullRequestsForm : Form
 
         _onlyMine.Text = Loc.T("PrOnlyMine");
         var top = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(8, 6, 8, 0) };
-        top.Controls.AddRange(new Control[] { _onlyMine, _refresh, _status });
+        top.Controls.AddRange(new Control[] { _onlyMine, _refresh, _status, _blocked });
 
         var close = NewButton("MachineClose", Theme.Neutral);
         close.DialogResult = DialogResult.OK;
         var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(8) };
-        bottom.Controls.AddRange(new Control[] { _create, _review, _approve, _complete, _open, close });
+        bottom.Controls.AddRange(new Control[] { _create, _review, _workItems, _approve, _complete, _open, close });
 
         Controls.Add(_grid);
         Controls.Add(top);
@@ -78,6 +79,7 @@ public sealed class PullRequestsForm : Form
         _complete.Click += async (_, _) => await CompleteAsync();
         _open.Click += (_, _) => { if (Selected is { } pr) OpenInBrowser(pr.WebUrl); };
         _review.Click += async (_, _) => await ReviewAsync();
+        _workItems.Click += (_, _) => { if (Selected is { } pr) LinkedWorkItemsForm.Show(this, _settings, pr); };
         _grid.CellDoubleClick += async (_, e) => { if (e.RowIndex >= 0) await ReviewAsync(); };
         _grid.SelectionChanged += (_, _) => UpdateButtons();
         Shown += async (_, _) => await LoadAsync();
@@ -92,12 +94,37 @@ public sealed class PullRequestsForm : Form
 
     private PullRequest? Selected => _grid.CurrentRow?.Tag as PullRequest;
 
+    /// <summary>Why the selected pull request cannot be approved or completed, shown next to the count.</summary>
+    private readonly Label _blocked = new() { AutoSize = true, Margin = new Padding(24, 8, 3, 3), ForeColor = Theme.Coral };
+
+    /// <summary>Pull requests whose checks could not be read; they are not held back by checks.</summary>
+    private readonly HashSet<int> _checksUnavailable = new();
+
+    /// <summary>Required checks that failed, or null while they are still being fetched.</summary>
+    private List<PolicyCheck>? FailedChecks(PullRequest pr) =>
+        _checks.TryGetValue(pr.Id, out var checks) ? checks.Where(c => c.Failed && c.IsBlocking).ToList()
+        : _checksUnavailable.Contains(pr.Id) ? new List<PolicyCheck>()
+        : null;
+
+    /// <summary>
+    /// Approving and completing are allowed only once the checks are known and no required one has
+    /// failed; completing also needs a draft-free, conflict-free pull request.
+    /// </summary>
     private void UpdateButtons()
     {
         var pr = Selected;
-        _approve.Enabled = pr != null && pr.MyVote != PullRequestService.VoteApproved;
-        _complete.Enabled = pr is { IsDraft: false };
-        _open.Enabled = _review.Enabled = pr != null;
+        var failed = pr == null ? null : FailedChecks(pr);
+        var checksOk = failed is { Count: 0 };
+        var conflicts = pr?.MergeStatus == "conflicts";
+        _approve.Enabled = pr != null && pr.MyVote != PullRequestService.VoteApproved && checksOk;
+        _complete.Enabled = pr is { IsDraft: false } && checksOk && !conflicts;
+        _open.Enabled = _review.Enabled = _workItems.Enabled = pr != null;
+
+        _blocked.Text = pr == null ? ""
+            : failed == null ? Loc.T("PrChecksPending")
+            : failed.Count > 0 ? Loc.T("PrBlockedChecks", string.Join(", ", failed.Select(c => c.Name)))
+            : conflicts ? Loc.T("PrBlockedConflicts")
+            : "";
     }
 
     private async Task<bool> RunAsync(Func<PullRequestService, Task> action)
@@ -130,6 +157,10 @@ public sealed class PullRequestsForm : Form
     private async Task LoadAsync()
     {
         _status.Text = Loc.T("PrLoading");
+        // Refresh fetches the checks again; answers still on their way from before are ignored.
+        _checks.Clear();
+        _checksUnavailable.Clear();
+        _checksVersion++;
         await RunAsync(async service =>
         {
             _pullRequests = await service.GetActiveAsync(_projects);
@@ -149,12 +180,80 @@ public sealed class PullRequestsForm : Form
         {
             var title = pr.IsDraft ? Loc.T("PrDraft") + " " + pr.Title : pr.Title;
             var index = _grid.Rows.Add(pr.Id, title, pr.RepositoryName, $"{pr.SourceBranch} → {pr.TargetBranch}", pr.CreatedBy,
-                pr.Reviewers, VoteText(pr.MyVote, pr.IAmReviewer), pr.Created?.ToString("yyyy-MM-dd") ?? "");
+                pr.Reviewers, VoteText(pr.MyVote, pr.IAmReviewer), "…", pr.Created?.ToString("yyyy-MM-dd") ?? "");
             _grid.Rows[index].Tag = pr;
+            if (_checks.TryGetValue(pr.Id, out var known)) ShowChecks(_grid.Rows[index], pr, known);
             if (pr.Id == selectedId) _grid.CurrentCell = _grid.Rows[index].Cells[0];
         }
         _status.Text = Loc.T("PrCount", shown.Count);
         UpdateButtons();
+        _ = LoadChecksAsync(shown.Where(p => !_checks.ContainsKey(p.Id)).ToList());
+    }
+
+    /// <summary>Checks per pull request ID; kept until the next Refresh.</summary>
+    private readonly Dictionary<int, List<PolicyCheck>> _checks = new();
+    private int _checksVersion;
+
+    /// <summary>Fetches the checks of the listed pull requests a few at a time; each row fills in when its answer arrives.</summary>
+    private async Task LoadChecksAsync(List<PullRequest> pullRequests)
+    {
+        var version = _checksVersion;
+        using var service = new PullRequestService(_settings);
+        using var gate = new SemaphoreSlim(6);
+        await Task.WhenAll(pullRequests.Select(async pr =>
+        {
+            await gate.WaitAsync();
+            try
+            {
+                var checks = await service.GetChecksAsync(pr);
+                if (version != _checksVersion || IsDisposed) return;
+                _checks[pr.Id] = checks;
+                if (RowOf(pr.Id) is { } row) ShowChecks(row, pr, checks);
+                if (Selected?.Id == pr.Id) UpdateButtons();
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or TaskCanceledException)
+            {
+                if (!IsDisposed && RowOf(pr.Id) is { } row)
+                {
+                    row.Cells["PrColChecks"].Value = Loc.T("PrChecksUnknown");
+                    row.Cells["PrColChecks"].ToolTipText = ex.Message;
+                }
+                if (!IsDisposed)
+                {
+                    _checksUnavailable.Add(pr.Id);
+                    if (Selected?.Id == pr.Id) UpdateButtons();
+                }
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }));
+    }
+
+    private DataGridViewRow? RowOf(int id) =>
+        _grid.Rows.Cast<DataGridViewRow>().FirstOrDefault(r => (r.Tag as PullRequest)?.Id == id);
+
+    /// <summary>One-line summary in the Checks column, coloured by outcome, with every check listed in its tooltip.</summary>
+    private static void ShowChecks(DataGridViewRow row, PullRequest pr, List<PolicyCheck> checks)
+    {
+        var failed = checks.Count(c => c.Failed && c.IsBlocking);
+        var pending = checks.Count(c => c.Pending);
+        var passed = checks.Count(c => c.Passed);
+        var conflicts = pr.MergeStatus == "conflicts";
+
+        var summary = failed > 0 ? Loc.T("PrChecksFailed", failed)
+            : pending > 0 ? Loc.T("PrChecksRunning", pending)
+            : checks.Count > 0 ? Loc.T("PrChecksPassed", passed, checks.Count)
+            : Loc.T("PrChecksNone");
+        if (conflicts) summary = Loc.T("PrConflicts") + "   " + summary;
+
+        var cell = row.Cells["PrColChecks"];
+        cell.Value = summary;
+        cell.Style.ForeColor = failed > 0 || conflicts ? Theme.Coral : pending > 0 ? Theme.Violet : checks.Count > 0 ? Theme.Green : Theme.Muted;
+        cell.ToolTipText = string.Join(Environment.NewLine, checks.Select(c =>
+            $"{(c.Passed ? "✔" : c.Failed ? "✖" : c.Pending ? "⏳" : "•")} {c.Name} ({Loc.T(c.IsBlocking ? "PrCheckRequired" : "PrCheckOptional")})"));
+        if (conflicts) cell.ToolTipText = Loc.T("PrConflicts") + Environment.NewLine + cell.ToolTipText;
     }
 
     /// <summary>The signed-in user's ID, to pick out pull requests they created or review.</summary>
@@ -172,19 +271,27 @@ public sealed class PullRequestsForm : Form
     private async Task ReviewAsync()
     {
         if (Selected is not { } pr) return;
-        using (var form = new PullRequestReviewForm(_settings, pr)) form.ShowDialog(this);
+        // The review window follows the same rule: no approving while a required check fails.
+        var failed = FailedChecks(pr);
+        if (failed == null)
+        {
+            await RunAsync(async service => _checks[pr.Id] = await service.GetChecksAsync(pr));
+            failed = FailedChecks(pr) ?? new List<PolicyCheck>();
+        }
+        var reason = failed.Count > 0 ? Loc.T("PrBlockedChecks", string.Join(", ", failed.Select(c => c.Name))) : null;
+        using (var form = new PullRequestReviewForm(_settings, pr, reason)) form.ShowDialog(this);
         await LoadAsync(); // votes and comments may have changed
     }
 
     private async Task ApproveAsync()
     {
-        if (Selected is not { } pr) return;
+        if (Selected is not { } pr || !_approve.Enabled) return;
         if (await RunAsync(service => service.ApproveAsync(pr))) await LoadAsync();
     }
 
     private async Task CompleteAsync()
     {
-        if (Selected is not { } pr) return;
+        if (Selected is not { } pr || !_complete.Enabled) return;
         using var form = new CompletePullRequestForm(pr);
         if (form.ShowDialog(this) != DialogResult.OK) return;
         if (await RunAsync(service => service.CompleteAsync(pr, form.Options))) await LoadAsync();
@@ -282,15 +389,21 @@ public sealed class NewPullRequestForm : Form
     private readonly TextBox _title = new() { Dock = DockStyle.Fill };
     private readonly TextBox _description = new() { Dock = DockStyle.Fill, Multiline = true, Height = 90, ScrollBars = ScrollBars.Vertical };
     private readonly CheckBox _draft = new() { AutoSize = true };
-    private readonly CheckedListBox _links = new() { Dock = DockStyle.Fill, Height = 150, CheckOnClick = true, IntegralHeight = false };
-    private readonly TextBox _addId = new() { Width = 110 };
-    private readonly Button _addIdButton = new() { AutoSize = true, Padding = new Padding(8, 0, 8, 0) };
+    private readonly CheckedListBox _links = new() { Dock = DockStyle.Fill, Height = 170, CheckOnClick = true, IntegralHeight = false };
+    private readonly TextBox _linkSearch = new() { Width = 280 };
+    private readonly Button _linkSearchButton = new() { AutoSize = true, Padding = new Padding(8, 0, 8, 0) };
+    private readonly Label _linkHint = new() { AutoSize = true, Margin = new Padding(8, 6, 3, 3) };
 
-    /// <summary>A work item in the link list: one of the loaded items, or one added by its ID.</summary>
-    private sealed record LinkOption(string Id, string Text)
+    /// <summary>A work item that can be linked: loaded in the main window, or found by searching Azure DevOps.</summary>
+    private sealed record LinkOption(string Id, string Type, string Title)
     {
-        public override string ToString() => Text;
+        public override string ToString() => $"{Type} {Id} - {Title}";
     }
+
+    /// <summary>Every work item known to the list (the search shows part of it), and the ticked ones.</summary>
+    private readonly List<LinkOption> _allLinks = new();
+    private readonly HashSet<string> _checkedIds = new();
+    private bool _fillingLinks;
     private readonly Button _createButton = new() { AutoSize = true, Padding = new Padding(12, 3, 12, 3) };
     private int _loadVersion;
 
@@ -330,23 +443,32 @@ public sealed class NewPullRequestForm : Form
         _draft.Text = Loc.T("PrCreateDraft");
         table.Controls.Add(new Label());
         table.Controls.Add(_draft);
-        // Tasks, bugs, change requests, stories...: anything loaded can be linked, several at once.
-        foreach (var item in linkable.OrderBy(i => i.Type).ThenBy(i => i.Title, StringComparer.CurrentCultureIgnoreCase))
-            _links.Items.Add(new LinkOption(item.Id, $"{item.Type} {item.Id} - {item.Title}"), item.Id == _task?.Id);
-        _addIdButton.Text = Loc.T("Add");
-        _addId.PlaceholderText = Loc.T("PrLinkById");
-        _addIdButton.Click += (_, _) => AddLinkById();
-        _addId.KeyDown += (_, e) =>
+        // Tasks, bugs, user stories, change requests...: anything can be linked, several at once.
+        foreach (var item in linkable) _allLinks.Add(new LinkOption(item.Id, item.Type, item.Title));
+        if (_task != null) _checkedIds.Add(_task.Id);
+        _linkSearch.PlaceholderText = Loc.T("PrLinkSearch");
+        _linkSearchButton.Text = Loc.T("PrSearchDevOps");
+        _linkSearch.TextChanged += (_, _) => FillLinks();
+        _linkSearch.KeyDown += async (_, e) =>
         {
             if (e.KeyCode != Keys.Enter) return;
-            e.SuppressKeyPress = true; // Enter adds the ID instead of creating the pull request
-            AddLinkById();
+            e.SuppressKeyPress = true; // Enter searches instead of creating the pull request
+            await SearchServerAsync();
         };
-        var addPanel = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
-        addPanel.Controls.AddRange(new Control[] { _addId, _addIdButton });
-        Row("PrLinks", _links);
+        _linkSearchButton.Click += async (_, _) => await SearchServerAsync();
+        _links.ItemCheck += (_, e) =>
+        {
+            if (_fillingLinks || _links.Items[e.Index] is not LinkOption option) return;
+            if (e.NewValue == CheckState.Checked) _checkedIds.Add(option.Id);
+            else _checkedIds.Remove(option.Id);
+            UpdateLinkHint();
+        };
+        var searchPanel = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
+        searchPanel.Controls.AddRange(new Control[] { _linkSearch, _linkSearchButton, _linkHint });
+        Row("PrLinks", searchPanel);
         table.Controls.Add(new Label());
-        table.Controls.Add(addPanel);
+        table.Controls.Add(_links);
+        FillLinks();
 
         _createButton.Text = Loc.T("PrCreate");
         var cancel = new Button { Text = Loc.T("Cancel"), AutoSize = true, DialogResult = DialogResult.Cancel, Padding = new Padding(8, 3, 8, 3) };
@@ -373,20 +495,56 @@ public sealed class NewPullRequestForm : Form
         };
     }
 
-    /// <summary>Adds (and ticks) a work item that is not in the list, by its number.</summary>
-    private void AddLinkById()
+    /// <summary>Lists the ticked items first, then the others that match the search text (ID, title or type).</summary>
+    private void FillLinks()
     {
-        var id = _addId.Text.Trim().TrimStart('#');
-        if (!int.TryParse(id, out var number) || number <= 0)
+        var text = _linkSearch.Text.Trim().TrimStart('#');
+        bool Matches(LinkOption o) => text.Length == 0 ||
+                                      o.Id.Contains(text, StringComparison.OrdinalIgnoreCase) ||
+                                      o.Title.Contains(text, StringComparison.CurrentCultureIgnoreCase) ||
+                                      o.Type.Contains(text, StringComparison.CurrentCultureIgnoreCase);
+        var shown = _allLinks.Where(o => _checkedIds.Contains(o.Id))
+            .Concat(_allLinks.Where(o => !_checkedIds.Contains(o.Id) && Matches(o))
+                .OrderBy(o => o.Type).ThenBy(o => o.Title, StringComparer.CurrentCultureIgnoreCase))
+            .ToList();
+
+        _fillingLinks = true;
+        _links.BeginUpdate();
+        _links.Items.Clear();
+        foreach (var option in shown) _links.Items.Add(option, _checkedIds.Contains(option.Id));
+        _links.EndUpdate();
+        _fillingLinks = false;
+        UpdateLinkHint();
+    }
+
+    private void UpdateLinkHint() => _linkHint.Text = Loc.T("PrLinksSelected", _checkedIds.Count);
+
+    /// <summary>Finds work items in Azure DevOps by ID or title, for ones not loaded in the main window.</summary>
+    private async Task SearchServerAsync()
+    {
+        var text = _linkSearch.Text.Trim().TrimStart('#');
+        if (text.Length == 0 || _project.SelectedItem is not string project) return;
+        _linkSearchButton.Enabled = false;
+        UseWaitCursor = true;
+        try
         {
-            MessageBox.Show(this, Loc.T("PrInvalidId"), Text, MessageBoxButtons.OK, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button1, Loc.MsgOptions);
-            return;
+            using var service = new PullRequestService(_settings);
+            var found = await service.SearchWorkItemsAsync(project, text);
+            if (IsDisposed) return;
+            foreach (var item in found.Where(f => _allLinks.All(o => o.Id != f.Id)))
+                _allLinks.Add(new LinkOption(item.Id, item.Type, item.Title));
+            FillLinks();
+            if (found.Count == 0) _linkHint.Text = Loc.T("PrSearchNothing");
         }
-        id = number.ToString();
-        var existing = _links.Items.Cast<LinkOption>().ToList().FindIndex(o => o.Id == id);
-        if (existing >= 0) _links.SetItemChecked(existing, true);
-        else _links.Items.Add(new LinkOption(id, Loc.T("PrLinkedId", id)), true);
-        _addId.Clear();
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or TaskCanceledException)
+        {
+            ShowError(ex);
+        }
+        finally
+        {
+            UseWaitCursor = false;
+            _linkSearchButton.Enabled = true;
+        }
     }
 
     private void ShowError(Exception ex) =>
@@ -457,7 +615,7 @@ public sealed class NewPullRequestForm : Form
             using var service = new PullRequestService(_settings);
             var (id, _) = await service.CreateAsync((string)_project.SelectedItem!, (GitRepository)_repository.SelectedItem!,
                 source, target, _title.Text.Trim(), _description.Text.Trim(), _draft.Checked,
-                _links.CheckedItems.Cast<LinkOption>().Select(o => o.Id).Distinct().ToList());
+                _checkedIds.ToList());
             CreatedId = id;
             DialogResult = DialogResult.OK;
             Close();

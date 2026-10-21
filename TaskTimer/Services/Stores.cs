@@ -38,9 +38,21 @@ public static class SettingsStore
         File.Move(tmp, path, overwrite: true);
     }
 
-    public static AppSettings Load() => LoadJson<AppSettings>("settings.json");
+    public static AppSettings Load()
+    {
+        var settings = LoadJson<AppSettings>("settings.json");
+        var hadAccounts = settings.Connections.Count > 0;
+        settings.EnsureConnections();
+        // Time entries are tied to the account's ID, so a newly created first account is saved at once.
+        if (!hadAccounts) Save(settings);
+        return settings;
+    }
 
-    public static void Save(AppSettings settings) => SaveJson("settings.json", settings);
+    public static void Save(AppSettings settings)
+    {
+        settings.StoreActiveConnection();
+        SaveJson("settings.json", settings);
+    }
 
     public static string GetPat(AppSettings settings)
     {
@@ -88,7 +100,8 @@ public sealed class TimeLog
         if (seconds < 1) return;
         Entries.Add(new TimeEntry
         {
-            Key = item.Key, Title = item.Title, Kind = kind, StartUtc = startUtc, Seconds = seconds
+            Key = item.Key, Title = item.Title, Kind = kind, StartUtc = startUtc, Seconds = seconds,
+            ConnectionId = IsLocalKey(item.Key) ? "" : ActiveConnection
         });
         Save();
     }
@@ -97,8 +110,24 @@ public sealed class TimeLog
     public double SecondsOn(DateTime localDay) =>
         Entries.Where(e => e.StartUtc.ToLocalTime().Date == localDay.Date).Sum(e => e.Seconds);
 
+    /// <summary>The account whose time is shown and sent; set by the main window.</summary>
+    public static string ActiveConnection { get; set; } = "";
+
+    private static bool IsLocalKey(string key) => key.StartsWith("local:", StringComparison.Ordinal);
+
+    private static bool InActiveAccount(TimeEntry e) => IsLocalKey(e.Key) || e.ConnectionId == ActiveConnection;
+
+    /// <summary>Entries saved before accounts existed belong to the first account.</summary>
+    public void AssignUnownedEntries(string connectionId)
+    {
+        var unowned = Entries.Where(e => e.ConnectionId.Length == 0 && !IsLocalKey(e.Key)).ToList();
+        if (unowned.Count == 0) return;
+        foreach (var e in unowned) e.ConnectionId = connectionId;
+        Save();
+    }
+
     public List<TimeEntry> Pending(string key) =>
-        Entries.Where(e => !e.Synced && e.Key == key).ToList();
+        Entries.Where(e => !e.Synced && e.Key == key && InActiveAccount(e)).ToList();
 
     public double PendingSeconds(string key) => Pending(key).Sum(e => e.Seconds);
 

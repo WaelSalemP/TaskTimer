@@ -45,6 +45,31 @@ public sealed class WorkItem
     public override string ToString() => $"{Id} - {Title}";
 }
 
+/// <summary>
+/// One saved Azure DevOps (or GitHub) account. The active one is copied into the matching top-level
+/// fields of <see cref="AppSettings"/>, which the rest of the app reads.
+/// </summary>
+public sealed class ConnectionProfile
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "";
+    public ProviderKind Provider { get; set; }
+    public string Url { get; set; } = "";
+    public string Project { get; set; } = "";
+    public string PatProtected { get; set; } = "";
+    public string Team { get; set; } = "";
+    public List<string> TeamEmails { get; set; } = new();
+    public string CustomerField { get; set; } = "System.AreaPath";
+    public string DeliveryDateField { get; set; } = "Delivery Date";
+    // Each account remembers its own filters, since sprints and customers differ between them.
+    public string SelectedSprint { get; set; } = "";
+    public string SelectedState { get; set; } = "";
+    public string SelectedCustomer { get; set; } = "";
+    public string SelectedAssignee { get; set; } = "";
+
+    public override string ToString() => Name;
+}
+
 public enum MachineLocation { OnPremises, Cloud }
 
 /// <summary>How a cloud machine is started and stopped: directly as an Azure VM, or as an LCS environment.</summary>
@@ -108,6 +133,11 @@ public sealed class TimeEntry
     public DateTime StartUtc { get; set; }
     public double Seconds { get; set; }
     public bool Synced { get; set; }
+    /// <summary>
+    /// Account the entry was recorded in. Work item numbers repeat between organizations, so time
+    /// belongs to its account and is only shown and sent there. Empty for local tasks.
+    /// </summary>
+    public string ConnectionId { get; set; } = "";
 }
 
 public sealed class AppSettings
@@ -142,6 +172,73 @@ public sealed class AppSettings
     public List<DevMachine> DevMachines { get; set; } = new();
     public string SelectedMachineId { get; set; } = "";
     public string Language { get; set; } = "en";
+    /// <summary>All saved accounts; the fields above and below hold the active one's values.</summary>
+    public List<ConnectionProfile> Connections { get; set; } = new();
+    public string ActiveConnectionId { get; set; } = "";
+    /// <summary>Name of the active account, as shown in the account list.</summary>
+    public string ConnectionName { get; set; } = "";
+
+    public ConnectionProfile? ActiveConnection => Connections.FirstOrDefault(c => c.Id == ActiveConnectionId);
+
+    /// <summary>After loading: turns a single-connection settings file into the first saved account.</summary>
+    public void EnsureConnections()
+    {
+        if (Connections.Count == 0)
+        {
+            var first = new ConnectionProfile();
+            Connections.Add(first);
+            ActiveConnectionId = first.Id;
+            if (ConnectionName.Length == 0) ConnectionName = DefaultName();
+            StoreActiveConnection();
+        }
+        if (ActiveConnection == null) ActivateConnection(Connections[0]);
+    }
+
+    /// <summary>A readable name from the address: the organization for Azure DevOps, else the provider.</summary>
+    public string DefaultName()
+    {
+        if (Provider == ProviderKind.GitHub) return "GitHub";
+        var parts = Url.Trim().TrimEnd('/').Split('/');
+        return parts.Length > 3 ? parts[^1] : "Azure DevOps";
+    }
+
+    /// <summary>Copies the active account's values from the top-level fields into its saved entry.</summary>
+    public void StoreActiveConnection()
+    {
+        if (ActiveConnection is not { } p) return;
+        p.Name = ConnectionName.Trim().Length > 0 ? ConnectionName.Trim() : DefaultName();
+        p.Provider = Provider;
+        p.Url = Url;
+        p.Project = Project;
+        p.PatProtected = PatProtected;
+        p.Team = Team;
+        p.TeamEmails = new List<string>(TeamEmails);
+        p.CustomerField = CustomerField;
+        p.DeliveryDateField = DeliveryDateField;
+        p.SelectedSprint = SelectedSprint;
+        p.SelectedState = SelectedState;
+        p.SelectedCustomer = SelectedCustomer;
+        p.SelectedAssignee = SelectedAssignee;
+    }
+
+    /// <summary>Makes a saved account the active one by copying its values into the top-level fields.</summary>
+    public void ActivateConnection(ConnectionProfile p)
+    {
+        ActiveConnectionId = p.Id;
+        ConnectionName = p.Name;
+        Provider = p.Provider;
+        Url = p.Url;
+        Project = p.Project;
+        PatProtected = p.PatProtected;
+        Team = p.Team;
+        TeamEmails = new List<string>(p.TeamEmails);
+        CustomerField = p.CustomerField;
+        DeliveryDateField = p.DeliveryDateField;
+        SelectedSprint = p.SelectedSprint;
+        SelectedState = p.SelectedState;
+        SelectedCustomer = p.SelectedCustomer;
+        SelectedAssignee = p.SelectedAssignee;
+    }
     /// <summary>Sprint filter on the main form. Empty = all sprints.</summary>
     public string SelectedSprint { get; set; } = "";
     public string SelectedState { get; set; } = "";

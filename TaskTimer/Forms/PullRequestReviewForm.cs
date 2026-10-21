@@ -46,7 +46,8 @@ public sealed class PullRequestReviewForm : Form
     private readonly ComboBox _view = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 240, Margin = new Padding(3, 4, 3, 3) };
     private ViewMode? _columnsFor;
 
-    public PullRequestReviewForm(AppSettings settings, PullRequest pr)
+    /// <param name="approveBlockedReason">When set, required checks have failed: approving is not offered and this says why.</param>
+    public PullRequestReviewForm(AppSettings settings, PullRequest pr, string? approveBlockedReason = null)
     {
         _settings = settings;
         _pr = pr;
@@ -66,6 +67,8 @@ public sealed class PullRequestReviewForm : Form
         _diff.DefaultCellStyle.Padding = new Padding(2, 0, 2, 0);
         SetupColumns(ViewMode.Inline);
         _diff.DefaultCellStyle.Font = _code;
+        _diff.ScrollBars = ScrollBars.Both;
+        _diff.SizeChanged += (_, _) => SizeCodeColumns();
         // Code reads left to right whatever the interface language is.
         _diff.RightToLeft = RightToLeft.No;
 
@@ -95,13 +98,18 @@ public sealed class PullRequestReviewForm : Form
         var general = NewButton("PrCommentGeneral", Theme.Neutral);
         var approve = NewButton("PrApprove", Theme.Green);
         var suggestions = NewButton("PrVoteSuggestions", Theme.Green);
+        approve.Enabled = suggestions.Enabled = approveBlockedReason == null;
+        if (approveBlockedReason != null)
+            header.Controls.Add(new Label { Text = approveBlockedReason, AutoSize = true, ForeColor = Theme.Coral, Margin = new Padding(24, 8, 3, 3) });
         var wait = NewButton("PrVoteWaiting", Theme.Neutral);
         var reject = NewButton("PrVoteRejected", Theme.Coral);
         var browser = NewButton("OpenInBrowser", Theme.Neutral);
+        var workItems = NewButton("PrWorkItems", Theme.Neutral);
+        workItems.Click += (_, _) => LinkedWorkItemsForm.Show(this, settings, pr);
         var close = NewButton("MachineClose", Theme.Neutral);
         close.DialogResult = DialogResult.OK;
         var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(8) };
-        bottom.Controls.AddRange(new Control[] { previous, next, comment, general, approve, suggestions, wait, reject, browser, close });
+        bottom.Controls.AddRange(new Control[] { previous, next, comment, general, approve, suggestions, wait, reject, workItems, browser, close });
 
         Controls.Add(split);
         Controls.Add(header);
@@ -237,8 +245,33 @@ public sealed class PullRequestReviewForm : Form
 
     private DataGridViewTextBoxColumn MarkColumn() => new() { Name = "Mark", Width = LogicalToDeviceUnits(22) };
 
-    private static DataGridViewTextBoxColumn CodeColumn(string name) =>
-        new() { Name = name, AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill };
+    // Code columns get their width from SizeCodeColumns: as wide as the longest line, so long lines
+    // scroll sideways instead of being cut off.
+    private static DataGridViewTextBoxColumn CodeColumn(string name) => new() { Name = name };
+
+    /// <summary>
+    /// Makes each code column at least its share of the visible width, and wider when its longest
+    /// line needs it; the grid then shows a horizontal scrollbar.
+    /// </summary>
+    private void SizeCodeColumns()
+    {
+        var codeColumns = new[] { "OldCode", "Code" }.Where(n => _diff.Columns.Contains(n)).Select(n => _diff.Columns[n]!).ToList();
+        if (codeColumns.Count == 0) return;
+
+        var otherColumns = _diff.Columns.Cast<DataGridViewColumn>().Except(codeColumns).Sum(c => c.Width);
+        var scrollBar = _diff.Controls.OfType<VScrollBar>().FirstOrDefault(s => s.Visible)?.Width ?? 0;
+        var share = Math.Max(LogicalToDeviceUnits(120), (_diff.ClientSize.Width - otherColumns - scrollBar - 2) / codeColumns.Count);
+        // The code font is monospaced, so the longest line in characters is the widest one.
+        var charWidth = TextRenderer.MeasureText(new string('M', 20), _code).Width / 20.0;
+        foreach (var column in codeColumns)
+        {
+            var longest = _diff.Rows.Cast<DataGridViewRow>()
+                .Where(r => r.Tag is not PullRequestComment) // comments use a narrower font and may simply be cut
+                .Select(r => (r.Cells[column.Index].Value as string)?.Length ?? 0)
+                .DefaultIfEmpty(0).Max();
+            column.Width = Math.Clamp((int)(longest * charWidth) + LogicalToDeviceUnits(16), share, 60000);
+        }
+    }
 
     /// <summary>Empties the grid and lays it out for a view. Every layout has a "Code" column (the new side).</summary>
     private void SetupColumns(ViewMode view)
@@ -281,6 +314,7 @@ public sealed class PullRequestReviewForm : Form
         };
         _diff.Rows.AddRange(rows.ToArray());
         if (rows.Count == 0) AddMessageRow(Loc.T(view == ViewMode.OldVersion ? "PrNoOldVersion" : "PrEmptyFile"));
+        SizeCodeColumns();
         _diff.ResumeLayout();
     }
 
@@ -386,6 +420,7 @@ public sealed class PullRequestReviewForm : Form
         var general = _comments.Where(c => c.FilePath.Length == 0).ToList();
         if (general.Count == 0) AddMessageRow(Loc.T("PrNoGeneralComments"));
         foreach (var comment in general) _diff.Rows.Add(CommentRow(comment, "Code"));
+        SizeCodeColumns();
     }
 
     private void AddMessageRow(string text)
@@ -393,6 +428,7 @@ public sealed class PullRequestReviewForm : Form
         var row = NewRow("", ("Code", text));
         row.DefaultCellStyle.ForeColor = Theme.Muted;
         _diff.Rows.Add(row);
+        SizeCodeColumns();
     }
 
     /// <summary>Moves to the first line of the next (or previous) block of changes.</summary>
@@ -408,8 +444,10 @@ public sealed class PullRequestReviewForm : Form
         {
             if (!StartsBlock(i)) continue;
             _diff.CurrentCell = _diff.Rows[i].Cells[Column("Code")];
-            // Leave a few lines of context above the change.
+            // Leave a few lines of context above the change, and start at the left edge: selecting
+            // the new-side cell would otherwise scroll the old side out of view.
             _diff.FirstDisplayedScrollingRowIndex = Math.Max(0, i - 3);
+            _diff.HorizontalScrollingOffset = 0;
             return;
         }
     }
@@ -462,6 +500,7 @@ public sealed class PullRequestReviewForm : Form
         if (_diff.Rows.Count == 0) return;
         _diff.FirstDisplayedScrollingRowIndex = Math.Clamp(keepRow, 0, _diff.Rows.Count - 1);
         _diff.CurrentCell = _diff.Rows[Math.Clamp(current, 0, _diff.Rows.Count - 1)].Cells[Column("Code")];
+        _diff.HorizontalScrollingOffset = 0;
     }
 
     private async Task VoteAsync(int vote)

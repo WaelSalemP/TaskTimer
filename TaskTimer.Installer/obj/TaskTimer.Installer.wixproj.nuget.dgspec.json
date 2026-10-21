@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Temp\\DevOps\\TaskTimer.Installer\\TaskTimer.Installer.wixproj": {}
+    "C:\\Users\\localadmin\\Documents\\GitHub\\TaskTimer\\TaskTimer.Installer\\TaskTimer.Installer.wixproj": {}
   },
   "projects": {
-    "C:\\Temp\\DevOps\\TaskTimer.Installer\\TaskTimer.Installer.wixproj": {
+    "C:\\Users\\localadmin\\Documents\\GitHub\\TaskTimer\\TaskTimer.Installer\\TaskTimer.Installer.wixproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Temp\\DevOps\\TaskTimer.Installer\\TaskTimer.Installer.wixproj",
+        "projectUniqueName": "C:\\Users\\localadmin\\Documents\\GitHub\\TaskTimer\\TaskTimer.Installer\\TaskTimer.Installer.wixproj",
         "projectName": "TaskTimerSetup",
-        "projectPath": "C:\\Temp\\DevOps\\TaskTimer.Installer\\TaskTimer.Installer.wixproj",
+        "projectPath": "C:\\Users\\localadmin\\Documents\\GitHub\\TaskTimer\\TaskTimer.Installer\\TaskTimer.Installer.wixproj",
         "packagesPath": "C:\\Users\\localadmin\\.nuget\\packages\\",
-        "outputPath": "C:\\Temp\\DevOps\\TaskTimer.Installer\\obj\\",
+        "outputPath": "C:\\Users\\localadmin\\Documents\\GitHub\\TaskTimer\\TaskTimer.Installer\\obj\\",
         "projectStyle": "PackageReference",
         "UsingMicrosoftNETSdk": false,
         "fallbackFolders": [
